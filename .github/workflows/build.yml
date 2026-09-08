@@ -1,0 +1,43 @@
+name: Build Flutter APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          flutter-version: '3.24.0' # استفاده از نسخه پایدار و مدرن
+          cache: true
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Generate App Icon
+        run: dart run flutter_launcher_icons
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jet-extractor-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
