@@ -24,8 +24,17 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          flutter-version: '3.24.0' # استفاده از نسخه پایدار و مدرن
+          flutter-version: '3.24.0'
           cache: true
+
+      # ۱. ساخت خودکار پوشه و فایل‌های بومی اندروید
+      - name: Create Android Platform Files
+        run: flutter create . --platforms=android --project-name=jet_extractor
+
+      # ۲. اضافه کردن دسترسی اینترنت به مانیفست (برای کارکرد صحیح وب‌ویو)
+      - name: Add Internet Permission
+        run: |
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>' android/app/src/main/AndroidManifest.xml
 
       - name: Get Dependencies
         run: flutter pub get
