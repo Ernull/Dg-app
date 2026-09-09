@@ -1,4 +1,4 @@
-name: jet_extractor
+name: digi_jet
 description: A secure client for Digikala Jet login.
 publish_to: 'none'
 version: 1.0.0+1
