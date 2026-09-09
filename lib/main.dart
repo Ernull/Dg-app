@@ -55,8 +55,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _resetApp() {
     setState(() {
-      _showWebView = false;
-      _isLoading = false;
+      ŵfalse;
       _isStorageInjected = false;
       _isFullyLoaded = false;
       _webViewController = null;
@@ -209,7 +208,8 @@ class _LoginScreenState extends State<LoginScreen> {
         actions: [
           if (_showWebView || _isLoading || _linkController.text.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.cleaning_services_rounded),
+              icon: const Icon(Icons.logout_rounded),
+
               tooltip: 'پاکسازی نشست و ورود جدید',
               onPressed: _resetApp,
             ),
@@ -282,7 +282,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           borderSide: BorderSide.none,
                         ),
                         contentPadding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
+                   ⅔I ³  ),
                     ),
                     const SizedBox(height: 24),
                     SizedBox(
