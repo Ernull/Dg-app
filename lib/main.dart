@@ -16,21 +16,19 @@ class JetSecureApp extends StatelessWidget {
     return MaterialApp(
       title: 'ورود به جت',
       debugShowCheckedModeBanner: false,
-      // راست‌چین کردن کل اپلیکیشن
       builder: (context, child) {
         return Directionality(
           textDirection: TextDirection.rtl,
           child: child!,
         );
       },
-      // تم دیجی‌کالا با Material 3
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFFEF394E),
           primary: const Color(0xFFEF394E),
         ),
-        fontFamily: 'Tahoma', // یا هر فونت دلخواه دیگر
+        fontFamily: 'Tahoma',
       ),
       home: const LoginScreen(),
     );
@@ -50,27 +48,27 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _showWebView = false;
   bool _isStorageInjected = false;
+  bool _isFullyLoaded = false; // برای مدیریت صفحه لودینگِ روی وب‌ویو
   
   WebViewController? _webViewController;
   String _jsInjectionCode = "";
 
-  // تابع بازگشت به حالت اولیه (پاکسازی)
   void _resetApp() {
     setState(() {
       _showWebView = false;
       _isLoading = false;
       _isStorageInjected = false;
+      _isFullyLoaded = false;
       _webViewController = null;
       _jsInjectionCode = "";
       _linkController.clear();
     });
   }
 
-  // تابع دریافت اطلاعات از لینک ربات و تزریق
   Future<void> _processLink() async {
     final link = _linkController.text.trim();
     if (link.isEmpty || !link.startsWith("http")) {
-      _showError("لطفاً یک لینک معتبر وارد کنید.");
+      _showError("لطفاً پیوند معتبر وارد کنید.");
       return;
     }
 
@@ -79,11 +77,10 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      // ارسال درخواست به سرور پایتون شما با هدرهای امنیتی
       final response = await http.get(
         Uri.parse(link),
         headers: {
-          "X-Client-App": "JetApp-Secure-Client",
+          "X-Client-App": "JetApp-Secure-Client", // هدر امنیتی برای دریافت JSON
           "User-Agent": "JetAppClient/1.0",
         },
       );
@@ -93,24 +90,29 @@ class _LoginScreenState extends State<LoginScreen> {
         if (data['status'] == 'success') {
           await _setupWebView(data['session']);
         } else {
-          _showError("لینک نامعتبر است یا منقضی شده.");
+          _showError("پیوند نامعتبر یا منقضی است.");
           setState(() { _isLoading = false; });
         }
       } else {
-        _showError("خطا در ارتباط با سرور. لینک منقضی است.");
+        _showError("خطا در ارتباط با سرور. (HTTP ${response.statusCode})");
         setState(() { _isLoading = false; });
       }
     } catch (e) {
-      _showError("خطا در ارتباط با شبکه.");
+      _showError("خطا در شبکه. لطفاً اینترنت خود را بررسی کنید.");
       setState(() { _isLoading = false; });
     }
   }
 
   Future<void> _setupWebView(Map<String, dynamic> sessionData) async {
-    // 1. تزریق کوکی‌ها
+    // 1. پاکسازی کامل نشست‌های قبلی مرورگر
     final cookieManager = WebViewCookieManager();
-    await cookieManager.clearCookies(); // پاک کردن سشن‌های قبلی
+    await cookieManager.clearCookies();
 
+    final WebViewController controller = WebViewController();
+    await controller.clearCache();
+    await controller.clearLocalStorage();
+
+    // 2. تزریق کوکی‌ها
     if (sessionData.containsKey('cookies')) {
       for (var cookie in sessionData['cookies']) {
         await cookieManager.setCookie(
@@ -124,24 +126,22 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     }
 
-    // 2. آماده‌سازی کدهای جاوااسکریپت برای تزریق LocalStorage
+    // 3. آماده‌سازی امنِ تزریق LocalStorage (حل مشکل کاراکترهای غیرمجاز)
     _jsInjectionCode = "";
     if (sessionData.containsKey('origins')) {
       var origins = sessionData['origins'][0];
       if (origins.containsKey('localStorage')) {
         for (var item in origins['localStorage']) {
           String key = item['name'];
-          // جلوگیری از تداخل کاراکترهای رشته‌ای در JS
-          String val = item['value'].toString().replaceAll("'", "\\'").replaceAll('\n', '\\n');
-          _jsInjectionCode += "window.localStorage.setItem('$key', '$val');\n";
+          String rawValue = item['value'].toString();
+          // کدگذاری کامل مقدار برای جلوگیری از تداخل نقل‌قول‌ها (Quotes) در JS
+          String encodedValue = Uri.encodeComponent(rawValue);
+          _jsInjectionCode += "window.localStorage.setItem('$key', decodeURIComponent('$encodedValue'));\n";
         }
       }
     }
 
-    // 3. پیکربندی WebViewController (نسخه 4)
-    final WebViewController controller = WebViewController();
-    
-    // تنظیمات اختصاصی اندروید برای پشتیبانی بهتر
+    // 4. تنظیمات WebViewController و اجرای مراحل (لود -> تزریق -> رفرش)
     if (controller.platform is AndroidWebViewController) {
       AndroidWebViewController.enableDebugging(false);
       (controller.platform as AndroidWebViewController).setMediaPlaybackRequiresUserGesture(false);
@@ -152,13 +152,26 @@ class _LoginScreenState extends State<LoginScreen> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (String url) async {
-            // وقتی برای اولین بار سایت لود شد، استوریج‌ها را تزریق و ریلود کن
+            // مرحله اول: سایت لود شده، حالا اطلاعات را تزریق می‌کنیم
             if (!_isStorageInjected && url.contains("digikalajet.com")) {
+              
+              // علامت‌گذاری به عنوان تزریق‌شده تا در رفرش بعدی حلقه تکرار نشود
+              _isStorageInjected = true; 
+              
+              // اجرای کدهای جاوااسکریپت و ساخت LocalStorage
               await controller.runJavaScript(_jsInjectionCode);
+              
+              // مکث حیاتی 500 میلی‌ثانیه‌ای برای اطمینان از ذخیره در دیتابیس مرورگر
+              await Future.delayed(const Duration(milliseconds: 500));
+              
+              // مرحله دوم: رفرش صفحه تا دیجی‌کالا متوجه لاگین شود
+              await controller.runJavaScript("window.location.href = 'https://www.digikalajet.com/';");
+            } 
+            // اگر تزریق انجام شده و صفحه در حال لود مجدد است:
+            else if (_isStorageInjected) {
               setState(() {
-                _isStorageInjected = true;
+                _isFullyLoaded = true; // لودینگ روی صفحه را محو می‌کنیم
               });
-              controller.reload(); // رفرش برای اعمال تغییرات در سایت
             }
           },
         ),
@@ -190,21 +203,41 @@ class _LoginScreenState extends State<LoginScreen> {
         foregroundColor: Colors.white,
         elevation: 0,
         title: const Text(
-          "ورود به دیجی‌کالا جت",
+          "دیجی‌کالا جت",
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         actions: [
-          // دکمه پاکسازی و استفاده برای لینک بعدی
           if (_showWebView || _isLoading || _linkController.text.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.cleaning_services_rounded),
-              tooltip: 'پاکسازی و لینک جدید',
+              tooltip: 'پاکسازی نشست و ورود جدید',
               onPressed: _resetApp,
             ),
         ],
       ),
       body: _showWebView
-          ? WebViewWidget(controller: _webViewController!)
+          ? Stack(
+              children: [
+                // مرورگر اصلی
+                WebViewWidget(controller: _webViewController!),
+                
+                // لودینگ پوششی (تا زمانی که کوکی‌ها ست نشده‌اند سایت خالی را نشان نمی‌دهد)
+                if (!_isFullyLoaded)
+                  Container(
+                    color: const Color(0xFFF8FAFC),
+                    child: const Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          CircularProgressIndicator(color: Color(0xFFEF394E)),
+                          SizedBox(height: 16),
+                          Text("در حال بارگذاری حساب...", style: TextStyle(color: Colors.grey)),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            )
           : Center(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(24.0),
@@ -227,7 +260,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      "لینک را در کادر زیر قرار دهید",
+                      "پیوندی که از ربات دریافت کرده‌اید را در کادر زیر قرار دهید",
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 13,
@@ -239,7 +272,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       controller: _linkController,
                       keyboardType: TextInputType.url,
                       textDirection: TextDirection.ltr,
-                      onChanged: (val) => setState(() {}),
                       decoration: InputDecoration(
                         hintText: "https://...",
                         filled: true,
