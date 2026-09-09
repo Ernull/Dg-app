@@ -48,14 +48,15 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _showWebView = false;
   bool _isStorageInjected = false;
-  bool _isFullyLoaded = false; // برای مدیریت صفحه لودینگِ روی وب‌ویو
+  bool _isFullyLoaded = false;
   
   WebViewController? _webViewController;
   String _jsInjectionCode = "";
 
   void _resetApp() {
     setState(() {
-      ŵfalse;
+      _showWebView = false;
+      _isLoading = false;
       _isStorageInjected = false;
       _isFullyLoaded = false;
       _webViewController = null;
@@ -79,7 +80,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final response = await http.get(
         Uri.parse(link),
         headers: {
-          "X-Client-App": "JetApp-Secure-Client", // هدر امنیتی برای دریافت JSON
+          "X-Client-App": "JetApp-Secure-Client",
           "User-Agent": "JetAppClient/1.0",
         },
       );
@@ -103,7 +104,6 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _setupWebView(Map<String, dynamic> sessionData) async {
-    // 1. پاکسازی کامل نشست‌های قبلی مرورگر
     final cookieManager = WebViewCookieManager();
     await cookieManager.clearCookies();
 
@@ -111,36 +111,41 @@ class _LoginScreenState extends State<LoginScreen> {
     await controller.clearCache();
     await controller.clearLocalStorage();
 
-    // 2. تزریق کوکی‌ها
+    // ۱. تزریق دقیق کوکی‌ها (هم برای دامین با نقطه و هم بدون نقطه)
     if (sessionData.containsKey('cookies')) {
       for (var cookie in sessionData['cookies']) {
+        String domain = cookie['domain'];
+        String name = cookie['name'];
+        String value = cookie['value'];
+        String path = cookie['path'] ?? '/';
+
         await cookieManager.setCookie(
-          WebViewCookie(
-            name: cookie['name'],
-            value: cookie['value'],
-            domain: cookie['domain'],
-            path: cookie['path'],
-          ),
+          WebViewCookie(name: name, value: value, domain: domain, path: path),
         );
+        
+        // اطمینان از اعمال کوکی در فرمت‌های مختلف دامین
+        if (domain.startsWith('.')) {
+          await cookieManager.setCookie(
+            WebViewCookie(name: name, value: value, domain: domain.substring(1), path: path),
+          );
+        }
       }
     }
 
-    // 3. آماده‌سازی امنِ تزریق LocalStorage (حل مشکل کاراکترهای غیرمجاز)
-    _jsInjectionCode = "";
+    // ۲. آماده‌سازی دستورات جاوااسکریپت برای حافظه مرورگر
+    _jsInjectionCode = "window.localStorage.clear();\n";
     if (sessionData.containsKey('origins')) {
       var origins = sessionData['origins'][0];
       if (origins.containsKey('localStorage')) {
         for (var item in origins['localStorage']) {
           String key = item['name'];
           String rawValue = item['value'].toString();
-          // کدگذاری کامل مقدار برای جلوگیری از تداخل نقل‌قول‌ها (Quotes) در JS
           String encodedValue = Uri.encodeComponent(rawValue);
           _jsInjectionCode += "window.localStorage.setItem('$key', decodeURIComponent('$encodedValue'));\n";
         }
       }
     }
 
-    // 4. تنظیمات WebViewController و اجرای مراحل (لود -> تزریق -> رفرش)
     if (controller.platform is AndroidWebViewController) {
       AndroidWebViewController.enableDebugging(false);
       (controller.platform as AndroidWebViewController).setMediaPlaybackRequiresUserGesture(false);
@@ -151,31 +156,31 @@ class _LoginScreenState extends State<LoginScreen> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (String url) async {
-            // مرحله اول: سایت لود شده، حالا اطلاعات را تزریق می‌کنیم
-            if (!_isStorageInjected && url.contains("digikalajet.com")) {
-              
-              // علامت‌گذاری به عنوان تزریق‌شده تا در رفرش بعدی حلقه تکرار نشود
-              _isStorageInjected = true; 
-              
-              // اجرای کدهای جاوااسکریپت و ساخت LocalStorage
+            // ۳. ترفند اصلی: اول یک صفحه خالی (favicon) باز می‌شود
+            // اینجا سایت واکنشی نشان نمی‌دهد، پس بهترین زمان برای تزریق است!
+            if (url.contains("favicon.ico") && !_isStorageInjected) {
               await controller.runJavaScript(_jsInjectionCode);
               
-              // مکث حیاتی 500 میلی‌ثانیه‌ای برای اطمینان از ذخیره در دیتابیس مرورگر
-              await Future.delayed(const Duration(milliseconds: 500));
+              _isStorageInjected = true;
               
-              // مرحله دوم: رفرش صفحه تا دیجی‌کالا متوجه لاگین شود
-              await controller.runJavaScript("window.location.href = 'https://www.digikalajet.com/';");
+              // یک مکث کوتاه برای نوشته شدن کامل روی حافظه گوشی
+              await Future.delayed(const Duration(milliseconds: 300));
+              
+              // حالا که اطلاعات نشست امن شد، سایت اصلی دیجی‌کالا را لود می‌کنیم
+              controller.loadRequest(Uri.parse('https://www.digikalajet.com/'));
             } 
-            // اگر تزریق انجام شده و صفحه در حال لود مجدد است:
-            else if (_isStorageInjected) {
+            // وقتی سایت اصلی لود شد، لودینگ پوششی را حذف می‌کنیم
+            else if (_isStorageInjected && !url.contains("favicon.ico")) {
               setState(() {
-                _isFullyLoaded = true; // لودینگ روی صفحه را محو می‌کنیم
+                _isFullyLoaded = true;
               });
             }
           },
         ),
-      )
-      ..loadRequest(Uri.parse('https://www.digikalajet.com/'));
+      );
+
+    // شروع فرآیند: لود کردن یک فایل استاتیک از دامین دیجی‌کالا جت (برای دور زدن کدهای ریکت)
+    controller.loadRequest(Uri.parse('https://www.digikalajet.com/favicon.ico'));
 
     setState(() {
       _webViewController = controller;
@@ -206,11 +211,11 @@ class _LoginScreenState extends State<LoginScreen> {
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         actions: [
+          // تغییر آیکون به خروج از حساب (طبق درخواست شما)
           if (_showWebView || _isLoading || _linkController.text.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.logout_rounded),
-
-              tooltip: 'پاکسازی نشست و ورود جدید',
+              tooltip: 'خروج و اکانت جدید',
               onPressed: _resetApp,
             ),
         ],
@@ -218,10 +223,9 @@ class _LoginScreenState extends State<LoginScreen> {
       body: _showWebView
           ? Stack(
               children: [
-                // مرورگر اصلی
                 WebViewWidget(controller: _webViewController!),
                 
-                // لودینگ پوششی (تا زمانی که کوکی‌ها ست نشده‌اند سایت خالی را نشان نمی‌دهد)
+                // این لودینگ فقط تا زمانی نشان داده می‌شود که تزریق با موفقیت تمام شده باشد
                 if (!_isFullyLoaded)
                   Container(
                     color: const Color(0xFFF8FAFC),
@@ -231,7 +235,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         children: [
                           CircularProgressIndicator(color: Color(0xFFEF394E)),
                           SizedBox(height: 16),
-                          Text("در حال بارگذاری حساب...", style: TextStyle(color: Colors.grey)),
+                          Text("در حال تأیید ورود...", style: TextStyle(color: Colors.grey)),
                         ],
                       ),
                     ),
@@ -282,7 +286,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           borderSide: BorderSide.none,
                         ),
                         contentPadding: const EdgeInsets.symmetric(vertical: 16),
-                   ⅔I ³  ),
+                      ),
                     ),
                     const SizedBox(height: 24),
                     SizedBox(
