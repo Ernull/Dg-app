@@ -27,14 +27,15 @@ jobs:
           flutter-version: '3.24.0'
           cache: true
 
-      # ۱. ساخت خودکار پوشه و فایل‌های بومی اندروید
+            # ۱. ساخت خودکار پوشه با یک شناسه (Package Name) کاملاً جدید
       - name: Create Android Platform Files
-        run: flutter create . --platforms=android --project-name=jet_extractor
+        run: flutter create . --platforms=android --org com.jetjon --project-name=app
 
-      # ۲. اضافه کردن دسترسی اینترنت به مانیفست (برای کارکرد صحیح وب‌ویو)
-      - name: Add Internet Permission
+      # ۲. اضافه کردن دسترسی اینترنت و تغییر نام نمایشی به جت‌جان
+      - name: Modify AndroidManifest
         run: |
           sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>' android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:label="app"/android:label="Jetjon"/g' android/app/src/main/AndroidManifest.xml
 
       - name: Get Dependencies
         run: flutter pub get
