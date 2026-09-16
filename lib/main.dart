@@ -4,17 +4,23 @@ import 'package:http/http.dart' as http;
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
+// ---------------------------------------------------
+// آدرس پایه سرور شما (بدون لایسنس آخر)
+// اگر دامین شما تغییر کرد، فقط این خط را ویرایش کنید
+const String apiBaseUrl = "https://dijijet.bond/auth/";
+// ---------------------------------------------------
+
 void main() {
-  runApp(const JetSecureApp());
+  runApp(const JetApp());
 }
 
-class JetSecureApp extends StatelessWidget {
-  const JetSecureApp({super.key});
+class JetApp extends StatelessWidget {
+  const JetApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ورود به جت',
+      title: 'ورود به حساب',
       debugShowCheckedModeBanner: false,
       builder: (context, child) {
         return Directionality(
@@ -24,6 +30,7 @@ class JetSecureApp extends StatelessWidget {
       },
       theme: ThemeData(
         useMaterial3: true,
+        scaffoldBackgroundColor: Colors.white,
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFFEF394E),
           primary: const Color(0xFFEF394E),
@@ -43,7 +50,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _linkController = TextEditingController();
+  final TextEditingController _licenseController = TextEditingController();
   
   bool _isLoading = false;
   bool _showWebView = false;
@@ -61,16 +68,29 @@ class _LoginScreenState extends State<LoginScreen> {
       _isFullyLoaded = false;
       _webViewController = null;
       _jsInjectionCode = "";
-      _linkController.clear();
+      _licenseController.clear();
     });
   }
 
-  Future<void> _processLink() async {
-    final link = _linkController.text.trim();
-    if (link.isEmpty || !link.startsWith("http")) {
-      _showError("لطفاً پیوند معتبر وارد کنید.");
+  // استخراج هوشمند لایسنس (حتی اگر کل لینک پیست شود)
+  String _extractLicense(String input) {
+    String text = input.trim();
+    if (text.isEmpty) return "";
+    if (text.contains('/')) {
+      return text.split('/').last.trim();
+    }
+    return text;
+  }
+
+  Future<void> _processLicense() async {
+    final rawInput = _licenseController.text.trim();
+    if (rawInput.isEmpty) {
+      _showError("لطفاً لایسنس را وارد کنید.");
       return;
     }
+
+    final licenseCode = _extractLicense(rawInput);
+    final String targetUrl = "$apiBaseUrl$licenseCode";
 
     setState(() {
       _isLoading = true;
@@ -78,7 +98,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final response = await http.get(
-        Uri.parse(link),
+        Uri.parse(targetUrl),
         headers: {
           "X-Client-App": "JetApp-Secure-Client",
           "User-Agent": "JetAppClient/1.0",
@@ -90,15 +110,15 @@ class _LoginScreenState extends State<LoginScreen> {
         if (data['status'] == 'success') {
           await _setupWebView(data['session']);
         } else {
-          _showError("پیوند نامعتبر یا منقضی است.");
+          _showError("لایسنس یافت نشد.");
           setState(() { _isLoading = false; });
         }
       } else {
-        _showError("خطا در ارتباط با سرور. (HTTP ${response.statusCode})");
+        _showError("لایسنس نامعتبر است یا منقضی شده.");
         setState(() { _isLoading = false; });
       }
     } catch (e) {
-      _showError("خطا در شبکه. لطفاً اینترنت خود را بررسی کنید.");
+      _showError("خطا در ارتباط با سرور.");
       setState(() { _isLoading = false; });
     }
   }
@@ -111,7 +131,7 @@ class _LoginScreenState extends State<LoginScreen> {
     await controller.clearCache();
     await controller.clearLocalStorage();
 
-    // ۱. تزریق دقیق کوکی‌ها (هم برای دامین با نقطه و هم بدون نقطه)
+    // تزریق کوکی‌ها
     if (sessionData.containsKey('cookies')) {
       for (var cookie in sessionData['cookies']) {
         String domain = cookie['domain'];
@@ -122,8 +142,6 @@ class _LoginScreenState extends State<LoginScreen> {
         await cookieManager.setCookie(
           WebViewCookie(name: name, value: value, domain: domain, path: path),
         );
-        
-        // اطمینان از اعمال کوکی در فرمت‌های مختلف دامین
         if (domain.startsWith('.')) {
           await cookieManager.setCookie(
             WebViewCookie(name: name, value: value, domain: domain.substring(1), path: path),
@@ -132,7 +150,7 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     }
 
-    // ۲. آماده‌سازی دستورات جاوااسکریپت برای حافظه مرورگر
+    // آماده‌سازی لوکال استوریج
     _jsInjectionCode = "window.localStorage.clear();\n";
     if (sessionData.containsKey('origins')) {
       var origins = sessionData['origins'][0];
@@ -156,20 +174,12 @@ class _LoginScreenState extends State<LoginScreen> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (String url) async {
-            // ۳. ترفند اصلی: اول یک صفحه خالی (favicon) باز می‌شود
-            // اینجا سایت واکنشی نشان نمی‌دهد، پس بهترین زمان برای تزریق است!
             if (url.contains("favicon.ico") && !_isStorageInjected) {
               await controller.runJavaScript(_jsInjectionCode);
-              
               _isStorageInjected = true;
-              
-              // یک مکث کوتاه برای نوشته شدن کامل روی حافظه گوشی
               await Future.delayed(const Duration(milliseconds: 300));
-              
-              // حالا که اطلاعات نشست امن شد، سایت اصلی دیجی‌کالا را لود می‌کنیم
               controller.loadRequest(Uri.parse('https://www.digikalajet.com/'));
             } 
-            // وقتی سایت اصلی لود شد، لودینگ پوششی را حذف می‌کنیم
             else if (_isStorageInjected && !url.contains("favicon.ico")) {
               setState(() {
                 _isFullyLoaded = true;
@@ -179,7 +189,6 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       );
 
-    // شروع فرآیند: لود کردن یک فایل استاتیک از دامین دیجی‌کالا جت (برای دور زدن کدهای ریکت)
     controller.loadRequest(Uri.parse('https://www.digikalajet.com/favicon.ico'));
 
     setState(() {
@@ -193,7 +202,9 @@ class _LoginScreenState extends State<LoginScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message, style: const TextStyle(fontFamily: 'Tahoma')),
-        backgroundColor: Colors.red[800],
+        backgroundColor: Colors.red[700],
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
   }
@@ -201,21 +212,21 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        backgroundColor: const Color(0xFFEF394E),
-        foregroundColor: Colors.white,
-        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1E293B),
+        elevation: 1,
+        shadowColor: Colors.black12,
         title: const Text(
           "دیجی‌کالا جت",
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
+        centerTitle: true,
         actions: [
-          // تغییر آیکون به خروج از حساب (طبق درخواست شما)
-          if (_showWebView || _isLoading || _linkController.text.isNotEmpty)
+          if (_showWebView || _isLoading || _licenseController.text.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.logout_rounded),
-              tooltip: 'خروج و اکانت جدید',
+              icon: const Icon(Icons.logout_rounded, color: Color(0xFFEF394E)),
+              tooltip: 'خروج',
               onPressed: _resetApp,
             ),
         ],
@@ -224,73 +235,70 @@ class _LoginScreenState extends State<LoginScreen> {
           ? Stack(
               children: [
                 WebViewWidget(controller: _webViewController!),
-                
-                // این لودینگ فقط تا زمانی نشان داده می‌شود که تزریق با موفقیت تمام شده باشد
                 if (!_isFullyLoaded)
                   Container(
-                    color: const Color(0xFFF8FAFC),
+                    color: Colors.white,
                     child: const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          CircularProgressIndicator(color: Color(0xFFEF394E)),
-                          SizedBox(height: 16),
-                          Text("در حال تأیید ورود...", style: TextStyle(color: Colors.grey)),
-                        ],
-                      ),
+                      child: CircularProgressIndicator(color: Color(0xFFEF394E)),
                     ),
                   ),
               ],
             )
           : Center(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24.0),
+                padding: const EdgeInsets.symmetric(horizontal: 24.0),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Icon(
-                      Icons.shopping_bag_rounded,
-                      size: 80,
-                      color: Color(0xFFEF394E),
-                    ),
-                    const SizedBox(height: 20),
                     const Text(
-                      "لینک اختصاصی را وارد کنید",
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF0F172A),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      "پیوندی که از ربات دریافت کرده‌اید را در کادر زیر قرار دهید",
+                      "ورود به حساب کاربری",
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        fontSize: 13,
-                        color: Color(0xFF64748B),
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1E293B),
                       ),
                     ),
-                    const SizedBox(height: 30),
+                    const SizedBox(height: 32),
                     TextField(
-                      controller: _linkController,
-                      keyboardType: TextInputType.url,
+                      controller: _licenseController,
+                      keyboardType: TextInputType.text,
                       textDirection: TextDirection.ltr,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 18, 
+                        fontWeight: FontWeight.bold, 
+                        letterSpacing: 1.5,
+                        color: Color(0xFF334155)
+                      ),
                       decoration: InputDecoration(
-                        hintText: "https://...",
+                        hintText: "لایسنس خود را وارد کنید",
+                        hintStyle: const TextStyle(
+                          fontSize: 14, 
+                          fontWeight: FontWeight.normal, 
+                          letterSpacing: 0,
+                          color: Color(0xFF94A3B8)
+                        ),
                         filled: true,
-                        fillColor: Colors.white,
-                        prefixIcon: const Icon(Icons.link, color: Colors.grey),
+                        fillColor: const Color(0xFFF8FAFC),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
+                          borderSide: const BorderSide(color: Color(0xFFE2E8F0), width: 1.5),
                         ),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 16),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFFE2E8F0), width: 1.5),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFFEF394E), width: 2),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 18),
                       ),
                     ),
                     const SizedBox(height: 24),
                     SizedBox(
-                      width: double.infinity,
                       height: 52,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
@@ -299,9 +307,9 @@ class _LoginScreenState extends State<LoginScreen> {
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          elevation: 2,
+                          elevation: 0,
                         ),
-                        onPressed: _isLoading ? null : _processLink,
+                        onPressed: _isLoading ? null : _processLicense,
                         child: _isLoading
                             ? const SizedBox(
                                 width: 24,
@@ -312,7 +320,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                               )
                             : const Text(
-                                "ورود به حساب",
+                                "تأیید و ورود",
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
