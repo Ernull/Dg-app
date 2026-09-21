@@ -27,11 +27,50 @@ jobs:
           flutter-version: '3.24.0'
           cache: true
 
-            # ۱. ساخت خودکار پوشه با یک شناسه (Package Name) کاملاً جدید
       - name: Create Android Platform Files
         run: flutter create . --platforms=android --org com.jetjon --project-name=app
 
-      # ۲. اضافه کردن دسترسی اینترنت و تغییر نام نمایشی به جت‌جان
+      - name: Align Kotlin version with Flutter 3.24
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          build_gradle = Path('android/build.gradle')
+          if build_gradle.exists():
+              text = build_gradle.read_text()
+              if "ext.kotlin_version" in text:
+                  text = re.sub(
+                      r"ext\.kotlin_version\s*=\s*['\"][^'\"]+['\"]",
+                      "ext.kotlin_version = '1.9.24'",
+                      text,
+                  )
+              else:
+                  text = text.replace(
+                      "buildscript {",
+                      "buildscript {\n    ext.kotlin_version = '1.9.24'",
+                      1,
+                  )
+              build_gradle.write_text(text)
+
+          settings_gradle = Path('android/settings.gradle')
+          if settings_gradle.exists():
+              text = settings_gradle.read_text()
+              text = re.sub(
+                  r'id\s+"org\.jetbrains\.kotlin\.android"\s+version\s+"[^"]+"\s+apply\s+false',
+                  'id "org.jetbrains.kotlin.android" version "1.9.24" apply false',
+                  text,
+              )
+              if 'org.jetbrains.kotlin.android' not in text:
+                  marker = '    id "com.android.application" version "7.3.1" apply false\n'
+                  if marker in text:
+                      text = text.replace(
+                          marker,
+                          marker + '    id "org.jetbrains.kotlin.android" version "1.9.24" apply false\n',
+                      )
+              settings_gradle.write_text(text)
+          PY
+
       - name: Modify AndroidManifest
         run: |
           sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>' android/app/src/main/AndroidManifest.xml
