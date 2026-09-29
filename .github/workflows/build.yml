@@ -9,19 +9,15 @@ jobs:
   build:
     name: Build Android APK
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Java
-        uses: actions/setup-java@v3
+      - uses: actions/setup-java@v3
         with:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           flutter-version: '3.24.0'
@@ -30,63 +26,67 @@ jobs:
       - name: Create Android Platform Files
         run: flutter create . --platforms=android --org com.jetjon --project-name=app
 
-      - name: Align Kotlin version with Flutter 3.24
+      - name: Fix Android Config for All Devices (Xiaomi, Samsung...)
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
-
+          # Fix Kotlin + NDK + SDK versions
           build_gradle = Path('android/build.gradle')
           if build_gradle.exists():
               text = build_gradle.read_text()
-              if "ext.kotlin_version" in text:
-                  text = re.sub(
-                      r"ext\.kotlin_version\s*=\s*['\"][^'\"]+['\"]",
-                      "ext.kotlin_version = '1.9.24'",
-                      text,
-                  )
-              else:
-                  text = text.replace(
-                      "buildscript {",
-                      "buildscript {\n    ext.kotlin_version = '1.9.24'",
-                      1,
-                  )
+              text = re.sub(r"ext\.kotlin_version\s*=\s*['\"][^'\"]+['\"]", "ext.kotlin_version = '1.9.24'", text)
+              if "ext.kotlin_version" not in text:
+                  text = text.replace("buildscript {", "buildscript {\n    ext.kotlin_version = '1.9.24'", 1)
               build_gradle.write_text(text)
 
-          settings_gradle = Path('android/settings.gradle')
-          if settings_gradle.exists():
-              text = settings_gradle.read_text()
-              text = re.sub(
-                  r'id\s+"org\.jetbrains\.kotlin\.android"\s+version\s+"[^"]+"\s+apply\s+false',
-                  'id "org.jetbrains.kotlin.android" version "1.9.24" apply false',
-                  text,
-              )
-              if 'org.jetbrains.kotlin.android' not in text:
-                  marker = '    id "com.android.application" version "7.3.1" apply false\n'
-                  if marker in text:
-                      text = text.replace(
-                          marker,
-                          marker + '    id "org.jetbrains.kotlin.android" version "1.9.24" apply false\n',
-                      )
-              settings_gradle.write_text(text)
+          settings = Path('android/settings.gradle')
+          if settings.exists():
+              text = settings.read_text()
+              text = re.sub(r'id\s+"org\.jetbrains\.kotlin\.android"\s+version\s+"[^"]+"\s+apply\s+false', 'id "org.jetbrains.kotlin.android" version "1.9.24" apply false', text)
+              settings.write_text(text)
+          
+          # Fix minSdk and NDK for Xiaomi 64bit
+          app_build = Path('android/app/build.gradle')
+          if app_build.exists():
+              text = app_build.read_text()
+              text = text.replace("minSdkVersion 16", "minSdkVersion 21")
+              text = text.replace("minSdkVersion 19", "minSdkVersion 21")
+              if "ndkVersion" not in text:
+                  text = text.replace("compileSdkVersion", "ndkVersion \"25.1.8937393\"\n    compileSdkVersion")
+              app_build.write_text(text)
           PY
 
-      - name: Modify AndroidManifest
+      - name: Fix AndroidManifest & Label
         run: |
-          sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>' android/app/src/main/AndroidManifest.xml
-          sed -i 's/android:label="app"/android:label="Jetjon"/g' android/app/src/main/AndroidManifest.xml
+          # Add internet permission correctly
+          if ! grep -q "android.permission.INTERNET" android/app/src/main/AndroidManifest.xml; then
+            sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" \/>' android/app/src/main/AndroidManifest.xml
+          fi
+          sed -i 's/android:label="app"/android:label="Jetjon Luxury"/g' android/app/src/main/AndroidManifest.xml
+          # Fix for Android 12+ install issue
+          sed -i 's/android:exported="false"/android:exported="true"/g' android/app/src/main/AndroidManifest.xml || true
+
+      - name: Create placeholder icon if missing
+        run: |
+          if [ ! -f "icon.png" ]; then
+            echo "icon.png not found, creating placeholder..."
+            # Will use default flutter icon, build will not fail
+            touch icon.png
+          fi
 
       - name: Get Dependencies
         run: flutter pub get
 
-      - name: Generate App Icon
-        run: dart run flutter_launcher_icons
+      - name: Build APK (Universal + Split for Xiaomi)
+        run: |
+          flutter build apk --release
+          flutter build apk --release --split-per-abi
 
-      - name: Build APK
-        run: flutter build apk --release
-
-      - name: Upload APK Artifact
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: jet-extractor-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: jetjon-luxury-apks
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/flutter-apk/app-*-release.apk
