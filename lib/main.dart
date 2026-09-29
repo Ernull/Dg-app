@@ -154,17 +154,48 @@ class _LuxuryLoginScreenState extends State<LuxuryLoginScreen> with SingleTicker
   }
 
   Future<void> _setupWebView(List<dynamic> cookies) async {
-    final cookieManager = WebViewCookieManager(); await cookieManager.clearCookies();
+    final cookieManager = WebViewCookieManager(); 
+    await cookieManager.clearCookies();
+    
+    // تزریق کوکی هوشمند برای دور زدن محدودیت‌های امنیتی دیجی‌کالا
     for (var c in cookies) {
-      String domain = (c['domain'] ?? '').toString().replaceFirst('.', '');
-      await cookieManager.setCookie(WebViewCookie(name: c['name'].toString(), value: c['value'].toString(), domain: domain, path: c['path'] ?? '/'));
+      String rawDomain = (c['domain'] ?? '').toString();
+      String name = c['name'].toString();
+      String value = c['value'].toString();
+      String path = (c['path'] ?? '/').toString();
+
+      // تزریق با دامین اصلی (مثلا .digikala.com)
+      await cookieManager.setCookie(
+        WebViewCookie(name: name, value: value, domain: rawDomain, path: path)
+      );
+      
+      // تزریق با دامین بدون نقطه برای اطمینان (مثلا digikala.com)
+      if (rawDomain.startsWith('.')) {
+        await cookieManager.setCookie(
+          WebViewCookie(name: name, value: value, domain: rawDomain.substring(1), path: path)
+        );
+      }
     }
+
     final controller = WebViewController();
-    await controller.clearCache(); await controller.clearLocalStorage();
-    if (controller.platform is AndroidWebViewController) AndroidWebViewController.enableDebugging(false);
+    await controller.clearCache(); 
+    await controller.clearLocalStorage();
+    
+    if (controller.platform is AndroidWebViewController) {
+      AndroidWebViewController.enableDebugging(false);
+    }
+    
     await controller.addJavaScriptChannel('JetLogChannel', onMessageReceived: (m) => _appendLog(m.message));
+    
     controller..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(NavigationDelegate(onPageStarted: (_) async => await controller.runJavaScript(_networkInterceptorJs), onPageFinished: (_) async { await controller.runJavaScript(_networkInterceptorJs); setState(()=> _isPageLoaded=true); }));
+      ..setNavigationDelegate(NavigationDelegate(
+        onPageStarted: (_) async => await controller.runJavaScript(_networkInterceptorJs), 
+        onPageFinished: (_) async { 
+          await controller.runJavaScript(_networkInterceptorJs); 
+          setState(()=> _isPageLoaded=true); 
+        }
+      ));
+      
     await controller.loadRequest(Uri.parse('https://www.digikala.com/profile/'));
     setState(() { _webViewController = controller; _showWebView = true; _isLoading = false; });
   }
@@ -207,9 +238,7 @@ class _LuxuryLoginScreenState extends State<LuxuryLoginScreen> with SingleTicker
                   ),
                   const SizedBox(height: 16),
                   Text("JETJON", style: GoogleFonts.vazirmatn(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: 4)),
-                  const SizedBox(height: 6),
-                  Text("ورود لوکس و آنی به دیجی‌کالا", style: GoogleFonts.vazirmatn(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w300)),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 16),
                   Container(height: 3, width: 32, decoration: BoxDecoration(color: const Color(0xFFEF4056), borderRadius: BorderRadius.circular(10))),
                 ]),
               ),
@@ -232,8 +261,6 @@ class _LuxuryLoginScreenState extends State<LuxuryLoginScreen> with SingleTicker
                         const SizedBox(width: 8),
                         Text("لینک ورود خود را وارد کنید", style: GoogleFonts.vazirmatn(fontWeight: FontWeight.w700, fontSize: 15, color: const Color(0xFF0F0F0F))),
                       ]),
-                      const SizedBox(height: 8),
-                      Text("لینک یکبار مصرفی که دریافت کرده‌اید را در کادر زیر قرار دهید.", style: GoogleFonts.vazirmatn(fontSize: 12.5, color: const Color(0xFF81858B), height: 1.8)),
                       const SizedBox(height: 20),
                       TextField(
                         controller: _urlController,
@@ -265,18 +292,12 @@ class _LuxuryLoginScreenState extends State<LuxuryLoginScreen> with SingleTicker
                           ),
                           child: _isLoading ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
                           : Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                              Text("تایید و ورود امن", style: GoogleFonts.vazirmatn(fontWeight: FontWeight.w800, fontSize: 15)),
+                              Text("تایید و ورود", style: GoogleFonts.vazirmatn(fontWeight: FontWeight.w800, fontSize: 15)),
                               const SizedBox(width: 8),
                               const Icon(Icons.arrow_back_rounded, size: 18),
                             ]),
                         ),
                       ),
-                      const SizedBox(height: 14),
-                      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        const Icon(Icons.lock_rounded, size: 12, color: Color(0xFF81858B)),
-                        const SizedBox(width: 4),
-                        Text("اتصال رمزنگاری شده و امن", style: GoogleFonts.vazirmatn(fontSize: 11, color: const Color(0xFF81858B))),
-                      ])
                     ],
                   ),
                 ),
