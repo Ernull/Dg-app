@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
+import 'package:url_launcher/url_launcher.dart'; // اضافه شدن پکیج برای باز کردن لینک
 
 void main() => runApp(const JetjonLuxuryApp());
 
@@ -157,23 +158,34 @@ class _LuxuryLoginScreenState extends State<LuxuryLoginScreen> with SingleTicker
     final cookieManager = WebViewCookieManager(); 
     await cookieManager.clearCookies();
     
-    // تزریق کوکی هوشمند برای دور زدن محدودیت‌های امنیتی دیجی‌کالا
+    // تزریق کوکی هوشمند برای دیجی‌کالا و کپی‌برداری برای دیجی‌کالا جت
     for (var c in cookies) {
       String rawDomain = (c['domain'] ?? '').toString();
       String name = c['name'].toString();
       String value = c['value'].toString();
       String path = (c['path'] ?? '/').toString();
 
-      // تزریق با دامین اصلی (مثلا .digikala.com)
+      // ۱. تزریق با دامین اصلی دیجی‌کالا (مثلا .digikala.com)
       await cookieManager.setCookie(
         WebViewCookie(name: name, value: value, domain: rawDomain, path: path)
       );
-      
-      // تزریق با دامین بدون نقطه برای اطمینان (مثلا digikala.com)
       if (rawDomain.startsWith('.')) {
         await cookieManager.setCookie(
           WebViewCookie(name: name, value: value, domain: rawDomain.substring(1), path: path)
         );
+      }
+
+      // ۲. کپی کردن همزمان کوکی‌ها برای دامنه‌ی دیجی‌کالا جت
+      if (rawDomain.contains('digikala.com')) {
+        String jetDomain = rawDomain.replaceAll('digikala.com', 'digikalajet.com');
+        await cookieManager.setCookie(
+          WebViewCookie(name: name, value: value, domain: jetDomain, path: path)
+        );
+        if (jetDomain.startsWith('.')) {
+          await cookieManager.setCookie(
+            WebViewCookie(name: name, value: value, domain: jetDomain.substring(1), path: path)
+          );
+        }
       }
     }
 
@@ -309,7 +321,18 @@ class _LuxuryLoginScreenState extends State<LuxuryLoginScreen> with SingleTicker
                 child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
                   _trustItem(Icons.verified_user_outlined, "ورود آنی"),
                   _trustItem(Icons.bolt_rounded, "بدون رمز عبور"),
-                  _trustItem(Icons.support_agent_rounded, "پشتیبانی"),
+                  _trustItem(
+                    Icons.support_agent_rounded, 
+                    "پشتیبانی",
+                    onTap: () async {
+                      final Uri url = Uri.parse('https://t.me/DiGkaalaa');
+                      if (await canLaunchUrl(url)) {
+                        await launchUrl(url, mode: LaunchMode.externalApplication);
+                      } else {
+                        _showSnack("نمی‌توان تلگرام را باز کرد", isError: true);
+                      }
+                    }
+                  ),
                 ]),
               ),
               const SizedBox(height: 24),
@@ -329,11 +352,24 @@ class _LuxuryLoginScreenState extends State<LuxuryLoginScreen> with SingleTicker
     );
   }
 
-  Widget _trustItem(IconData icon, String label){
-    return Column(children: [
-      Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, border: Border.all(color: const Color(0xFFF0F0F0)), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10)]), child: Icon(icon, size: 18, color: const Color(0xFF0F0F0F))),
-      const SizedBox(height: 6),
-      Text(label, style: GoogleFonts.vazirmatn(fontSize: 11, color: const Color(0xFF81858B), fontWeight: FontWeight.w500)),
-    ]);
+  Widget _trustItem(IconData icon, String label, {VoidCallback? onTap}){
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Column(children: [
+        Container(
+          padding: const EdgeInsets.all(10), 
+          decoration: BoxDecoration(
+            color: Colors.white, 
+            shape: BoxShape.circle, 
+            border: Border.all(color: const Color(0xFFF0F0F0)), 
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10)]
+          ), 
+          child: Icon(icon, size: 18, color: const Color(0xFF0F0F0F))
+        ),
+        const SizedBox(height: 6),
+        Text(label, style: GoogleFonts.vazirmatn(fontSize: 11, color: const Color(0xFF81858B), fontWeight: FontWeight.w500)),
+      ]),
+    );
   }
 }
