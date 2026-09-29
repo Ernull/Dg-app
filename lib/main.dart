@@ -6,19 +6,17 @@ import 'package:path_provider/path_provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
-const String apiBaseUrl = "https://dijijet.bond/auth/";
-
 void main() {
-  runApp(const JetApp());
+  runApp(const NexusApp());
 }
 
-class JetApp extends StatelessWidget {
-  const JetApp({super.key});
+class NexusApp extends StatelessWidget {
+  const NexusApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'دیجی‌کالا جت',
+      title: 'ورود خودکار دیجی‌کالا',
       debugShowCheckedModeBanner: false,
       builder: (context, child) => Directionality(
         textDirection: TextDirection.rtl,
@@ -46,32 +44,29 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _licenseController = TextEditingController();
+  final TextEditingController _urlController = TextEditingController();
 
   bool _isLoading = false;
   bool _showWebView = false;
-  bool _isStorageInjected = false;
   bool _isFullyLoaded = false;
 
   WebViewController? _webViewController;
-  String _jsInjectionCode = "";
   File? _logFile;
 
-  // اسکریپت JS برای هوک کردن Fetch و XMLHttpRequest و فیلتر کردن درخواست‌های بیهوده
+  // اسکریپت JS برای هوک کردن درخواست‌های شبکه (تنظیم شده برای دیجی‌کالا)
   static const String _networkInterceptorJs = """
     (function() {
-      if (window.__jetLoggerInstalled) return;
-      window.__jetLoggerInstalled = true;
+      if (window.__nexusLoggerInstalled) return;
+      window.__nexusLoggerInstalled = true;
 
       function isImportant(url) {
         if (!url) return false;
         var u = url.toLowerCase();
-        // فیلتر فایل‌های استاتیک و آیکون‌ها و اسکریپت‌ها
+        // فیلتر فایل‌های استاتیک
         if (u.match(/\\.(png|jpg|jpeg|gif|webp|svg|ico|css|woff|woff2|ttf|js)(\\?.*)?\$/)) return false;
-        if (u.includes('google-analytics') || u.includes('sentry') || u.includes('hotjar') || u.includes('favicon.ico')) return false;
+        if (u.includes('google-analytics') || u.includes('sentry') || u.includes('hotjar')) return false;
         
-        // صرفاً مسیرهای API و سرویس‌های مرتبط با جت و کاربر
-        return u.includes('digikala') || u.includes('jet') || u.includes('/api/') || u.includes('/v1/') || u.includes('/v2/') || u.includes('user') || u.includes('auth');
+        return u.includes('digikala') || u.includes('/api/') || u.includes('/v1/') || u.includes('/v2/') || u.includes('user') || u.includes('auth');
       }
 
       function sendToFlutter(payload) {
@@ -82,7 +77,6 @@ class _LoginScreenState extends State<LoginScreen> {
         } catch(e) {}
       }
 
-      // رهگیری Fetch API
       var originalFetch = window.fetch;
       window.fetch = async function() {
         var args = Array.from(arguments);
@@ -130,7 +124,6 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       };
 
-      // رهگیری XMLHttpRequest (XHR)
       var origOpen = XMLHttpRequest.prototype.open;
       var origSend = XMLHttpRequest.prototype.send;
       var origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
@@ -180,13 +173,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _initLogFile() async {
     final dir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
-    _logFile = File('${dir.path}/jet_network_logs.txt');
+    _logFile = File('${dir.path}/digikala_network_logs.txt');
     if (!await _logFile!.exists()) {
       await _logFile!.create(recursive: true);
     }
   }
 
-  // ذخیره لاگ مرتب‌شده در فایل متنی
   Future<void> _appendLog(String jsonString) async {
     if (_logFile == null) await _initLogFile();
 
@@ -197,13 +189,13 @@ class _LoginScreenState extends State<LoginScreen> {
       final buffer = StringBuffer();
       buffer.writeln("================================================================================");
       buffer.writeln("زمان ثبت: $timestamp");
-      buffer.writeln("نوع درخواست: ${data['type']} | متد: ${data['method']} | وضعیت (Status): ${data['status'] ?? 'نامشخص'}");
+      buffer.writeln("نوع درخواست: ${data['type']} | متد: ${data['method']} | وضعیت: ${data['status'] ?? 'نامشخص'}");
       buffer.writeln("آدرس URL: ${data['url']}");
-      buffer.writeln("--- هدرهای درخواست (Request Headers) ---");
+      buffer.writeln("--- هدرهای درخواست ---");
       buffer.writeln(data['reqHeaders'] != null ? const JsonEncoder.withIndent('  ').convert(data['reqHeaders']) : "ندارد");
-      buffer.writeln("--- بدنه ارسالی (Request Body) ---");
+      buffer.writeln("--- بدنه ارسالی ---");
       buffer.writeln(data['reqBody'] ?? "خالی");
-      buffer.writeln("--- بدنه پاسخ سرور (Response Body) ---");
+      buffer.writeln("--- پاسخ سرور ---");
       buffer.writeln(data['resBody'] ?? data['error'] ?? "خالی");
       buffer.writeln("================================================================================\n");
 
@@ -211,44 +203,32 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (_) {}
   }
 
-  void _resetApp() {
+  void _resetApp() async {
+    await WebViewCookieManager().clearCookies();
     setState(() {
       _showWebView = false;
       _isLoading = false;
-      _isStorageInjected = false;
       _isFullyLoaded = false;
       _webViewController = null;
-      _jsInjectionCode = "";
-      _licenseController.clear();
+      _urlController.clear();
     });
   }
 
-  String _extractLicense(String input) {
-    String text = input.trim();
-    if (text.isEmpty) return "";
-    if (text.contains('/')) {
-      return text.split('/').last.trim();
-    }
-    return text;
-  }
-
-  Future<void> _processLicense() async {
-    final rawInput = _licenseController.text.trim();
-    if (rawInput.isEmpty) {
-      _showError("لطفاً لایسنس را وارد کنید.");
+  Future<void> _processUrl() async {
+    final url = _urlController.text.trim();
+    if (url.isEmpty || !url.startsWith("http")) {
+      _showError("لطفاً یک لینک معتبر وارد کنید.");
       return;
     }
-
-    final licenseCode = _extractLicense(rawInput);
-    final String targetUrl = "$apiBaseUrl$licenseCode";
 
     setState(() {
       _isLoading = true;
     });
 
     try {
+      // ارسال درخواست به سرور پایتون برای گرفتن کوکی‌ها
       final response = await http.get(
-        Uri.parse(targetUrl),
+        Uri.parse(url),
         headers: {
           "X-Client-App": "JetApp-Secure-Client",
           "User-Agent": "JetAppClient/1.0",
@@ -257,14 +237,25 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        if (data['status'] == 'success') {
-          await _setupWebView(data['session']);
+        
+        // پیدا کردن آرایه کوکی‌ها به صورت هوشمند
+        List<dynamic> cookies = [];
+        var sessionData = data['session'] ?? data;
+        
+        if (sessionData is List) {
+          cookies = sessionData;
+        } else if (sessionData is Map && sessionData.containsKey('cookies')) {
+          cookies = sessionData['cookies'];
+        }
+
+        if (cookies.isNotEmpty) {
+          await _setupWebViewAndInjectCookies(cookies);
         } else {
-          _showError("لایسنس یافت نشد.");
+          _showError("کوکی معتبری در لینک یافت نشد.");
           setState(() { _isLoading = false; });
         }
       } else {
-        _showError("لایسنس نامعتبر است یا منقضی شده.");
+        _showError("لینک نامعتبر است یا منقضی شده.");
         setState(() { _isLoading = false; });
       }
     } catch (e) {
@@ -273,53 +264,36 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> _setupWebView(Map<String, dynamic> sessionData) async {
+  Future<void> _setupWebViewAndInjectCookies(List<dynamic> cookies) async {
     final cookieManager = WebViewCookieManager();
     await cookieManager.clearCookies();
+
+    // تزریق کوکی‌ها به مرورگر داخلی
+    for (var cookie in cookies) {
+      String domain = (cookie['domain'] ?? '').toString();
+      String name = cookie['name'].toString();
+      String value = cookie['value'].toString();
+      String path = (cookie['path'] ?? '/').toString();
+
+      // حذف نقطه ابتدای دامنه در صورت وجود برای سازگاری بهتر
+      if (domain.startsWith('.')) {
+        domain = domain.substring(1);
+      }
+
+      await cookieManager.setCookie(
+        WebViewCookie(name: name, value: value, domain: domain, path: path),
+      );
+    }
 
     final WebViewController controller = WebViewController();
     await controller.clearCache();
     await controller.clearLocalStorage();
-
-    // تزریق کوکی‌ها
-    if (sessionData.containsKey('cookies')) {
-      for (var cookie in sessionData['cookies']) {
-        String domain = cookie['domain'];
-        String name = cookie['name'];
-        String value = cookie['value'];
-        String path = cookie['path'] ?? '/';
-
-        await cookieManager.setCookie(
-          WebViewCookie(name: name, value: value, domain: domain, path: path),
-        );
-        if (domain.startsWith('.')) {
-          await cookieManager.setCookie(
-            WebViewCookie(name: name, value: value, domain: domain.substring(1), path: path),
-          );
-        }
-      }
-    }
-
-    // تنظیم LocalStorage
-    _jsInjectionCode = "window.localStorage.clear();\n";
-    if (sessionData.containsKey('origins')) {
-      var origins = sessionData['origins'][0];
-      if (origins.containsKey('localStorage')) {
-        for (var item in origins['localStorage']) {
-          String key = item['name'];
-          String rawValue = item['value'].toString();
-          String encodedValue = Uri.encodeComponent(rawValue);
-          _jsInjectionCode += "window.localStorage.setItem('$key', decodeURIComponent('$encodedValue'));\n";
-        }
-      }
-    }
 
     if (controller.platform is AndroidWebViewController) {
       AndroidWebViewController.enableDebugging(false);
       (controller.platform as AndroidWebViewController).setMediaPlaybackRequiresUserGesture(false);
     }
 
-    // اضافه کردن کانال ارتباطی لاگ به وب‌ویو
     await controller.addJavaScriptChannel(
       'JetLogChannel',
       onMessageReceived: (JavaScriptMessage message) {
@@ -332,27 +306,19 @@ class _LoginScreenState extends State<LoginScreen> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (String url) async {
-            // تزریق مداوم اسکریپت اسنیفر در شروع هر صفحه برای از دست نرفتن ریکوئست‌ها
             await controller.runJavaScript(_networkInterceptorJs);
           },
           onPageFinished: (String url) async {
             await controller.runJavaScript(_networkInterceptorJs);
-
-            if (url.contains("favicon.ico") && !_isStorageInjected) {
-              await controller.runJavaScript(_jsInjectionCode);
-              _isStorageInjected = true;
-              await Future.delayed(const Duration(milliseconds: 300));
-              controller.loadRequest(Uri.parse('https://www.digikalajet.com/'));
-            } else if (_isStorageInjected && !url.contains("favicon.ico")) {
-              setState(() {
-                _isFullyLoaded = true;
-              });
-            }
+            setState(() {
+              _isFullyLoaded = true;
+            });
           },
         ),
       );
 
-    controller.loadRequest(Uri.parse('https://www.digikalajet.com/favicon.ico'));
+    // پس از تنظیم کوکی‌ها مستقیماً وارد پروفایل می‌شویم
+    controller.loadRequest(Uri.parse('https://www.digikala.com/profile/'));
 
     setState(() {
       _webViewController = controller;
@@ -412,7 +378,7 @@ class _LoginScreenState extends State<LoginScreen> {
         elevation: 1,
         shadowColor: Colors.black12,
         title: const Text(
-          "دیجی‌کالا جت",
+          "ورود خودکار دیجی‌کالا",
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
@@ -422,7 +388,7 @@ class _LoginScreenState extends State<LoginScreen> {
             tooltip: 'مشاهده مسیر فایل لاگ',
             onPressed: _showLogInfo,
           ),
-          if (_showWebView || _isLoading || _licenseController.text.isNotEmpty)
+          if (_showWebView || _isLoading || _urlController.text.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.logout_rounded, color: Color(0xFFEF394E)),
               tooltip: 'خروج',
@@ -450,8 +416,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    const Icon(Icons.shopping_bag_rounded, size: 80, color: Color(0xFFEF394E)),
+                    const SizedBox(height: 24),
                     const Text(
-                      "ورود به حساب کاربری",
+                      "دریافت امن اطلاعات حساب",
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 20,
@@ -461,22 +429,17 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 32),
                     TextField(
-                      controller: _licenseController,
-                      keyboardType: TextInputType.text,
+                      controller: _urlController,
+                      keyboardType: TextInputType.url,
                       textDirection: TextDirection.ltr,
-                      textAlign: TextAlign.center,
                       style: const TextStyle(
-                        fontSize: 18, 
-                        fontWeight: FontWeight.bold, 
-                        letterSpacing: 1.5,
+                        fontSize: 16, 
                         color: Color(0xFF334155),
                       ),
                       decoration: InputDecoration(
-                        hintText: "لایسنس خود را وارد کنید",
+                        hintText: "لینک ورود خود را وارد کنید",
                         hintStyle: const TextStyle(
                           fontSize: 14, 
-                          fontWeight: FontWeight.normal, 
-                          letterSpacing: 0,
                           color: Color(0xFF94A3B8),
                         ),
                         filled: true,
@@ -493,7 +456,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           borderRadius: BorderRadius.circular(12),
                           borderSide: const BorderSide(color: Color(0xFFEF394E), width: 2),
                         ),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 18),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+                        prefixIcon: const Icon(Icons.link, color: Color(0xFFEF394E)),
                       ),
                     ),
                     const SizedBox(height: 24),
@@ -508,7 +472,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           elevation: 0,
                         ),
-                        onPressed: _isLoading ? null : _processLicense,
+                        onPressed: _isLoading ? null : _processUrl,
                         child: _isLoading
                             ? const SizedBox(
                                 width: 24,
@@ -519,7 +483,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                               )
                             : const Text(
-                                "تأیید و ورود",
+                                "تأیید و ورود به دیجی‌کالا",
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
