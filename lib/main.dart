@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
-import 'package:url_launcher/url_launcher.dart'; 
+import 'package:url_launcher/url_launcher.dart';
 
 void main() => runApp(const JetjonApp());
 
@@ -154,18 +154,17 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     } catch (e) { _showSnack("خطا در ارتباط با سرور", isError: true); setState(()=> _isLoading=false); }
   }
 
-  // دقیقاً همان کدهای تزریق کوکی از نسخه قدیمی شما که به درستی کار می‌کرد
   Future<void> _setupWebView(List<dynamic> cookies) async {
     final cookieManager = WebViewCookieManager(); 
     await cookieManager.clearCookies();
     
+    // دقیقاً منطق نسخه قدیمی شما که به درستی روی دیجی‌جت کار می‌کرد
     for (var cookie in cookies) {
       String domain = (cookie['domain'] ?? '').toString();
       String name = cookie['name'].toString();
       String value = cookie['value'].toString();
       String path = (cookie['path'] ?? '/').toString();
 
-      // حذف نقطه ابتدای دامنه در صورت وجود برای سازگاری بهتر
       if (domain.startsWith('.')) {
         domain = domain.substring(1);
       }
@@ -221,7 +220,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         child: SingleChildScrollView(
           child: Column(
             children: [
-              // Header
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(24, 60, 24, 40),
@@ -304,7 +302,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                 ),
               ),
               const SizedBox(height: 24),
-              // Trust badges
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 32),
                 child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
