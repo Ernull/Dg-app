@@ -1,7 +1,7 @@
 name: digijeet
-description: Jetjon Luxury Client for Digikala
+description: Jetjon Client for Digikala
 publish_to: 'none'
-version: 2.1.0+2
+version: 2.1.0+3
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
@@ -26,4 +26,3 @@ flutter_launcher_icons:
 
 flutter:
   uses-material-design: true
-
