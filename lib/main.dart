@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:url_launcher/url_launcher.dart'; 
 
 void main() => runApp(const JetjonApp());
 
@@ -154,33 +154,25 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     } catch (e) { _showSnack("خطا در ارتباط با سرور", isError: true); setState(()=> _isLoading=false); }
   }
 
+  // دقیقاً همان کدهای تزریق کوکی از نسخه قدیمی شما که به درستی کار می‌کرد
   Future<void> _setupWebView(List<dynamic> cookies) async {
     final cookieManager = WebViewCookieManager(); 
     await cookieManager.clearCookies();
     
-    // تزریق کوکی فراگیر (Aggressive Cookie Injection) برای پشتیبانی کامل از SSO (Single Sign-On)
-    for (var c in cookies) {
-      String rawDomain = (c['domain'] ?? '').toString();
-      String name = c['name'].toString();
-      String value = c['value'].toString();
-      String path = (c['path'] ?? '/').toString();
+    for (var cookie in cookies) {
+      String domain = (cookie['domain'] ?? '').toString();
+      String name = cookie['name'].toString();
+      String value = cookie['value'].toString();
+      String path = (cookie['path'] ?? '/').toString();
 
-      // ساخت لیست تمامی دامنه‌ها و ساب‌دامین‌های ممکن برای دیجی‌کالا و جت
-      Set<String> targetDomains = {
-        rawDomain,
-        rawDomain.startsWith('.') ? rawDomain.substring(1) : '.$rawDomain',
-        '.digikala.com',
-        'digikala.com',
-        'auth.digikala.com',
-        '.digikalajet.com',
-        'digikalajet.com'
-      };
-
-      for (String domain in targetDomains) {
-        await cookieManager.setCookie(
-          WebViewCookie(name: name, value: value, domain: domain, path: path)
-        );
+      // حذف نقطه ابتدای دامنه در صورت وجود برای سازگاری بهتر
+      if (domain.startsWith('.')) {
+        domain = domain.substring(1);
       }
+
+      await cookieManager.setCookie(
+        WebViewCookie(name: name, value: value, domain: domain, path: path),
+      );
     }
 
     final controller = WebViewController();
