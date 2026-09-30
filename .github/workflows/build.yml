@@ -23,8 +23,9 @@ jobs:
           flutter-version: '3.24.0'
           cache: true
 
+      # در اینجا شناسه برنامه به com.jetjon2 تغییر کرده است تا به عنوان برنامه جدید نصب شود
       - name: Create Android Platform Files
-        run: flutter create . --platforms=android --org com.jetjon --project-name=app
+        run: flutter create . --platforms=android --org com.jetjon2 --project-name=app
 
       - name: Fix Android Config for All Devices (Xiaomi, Samsung...)
         run: |
@@ -60,7 +61,7 @@ jobs:
           if ! grep -q "android.permission.INTERNET" android/app/src/main/AndroidManifest.xml; then
             sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" \/>' android/app/src/main/AndroidManifest.xml
           fi
-          sed -i 's/android:label="app"/android:label="Jetjon Luxury"/g' android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:label="app"/android:label="Jetjon"/g' android/app/src/main/AndroidManifest.xml
           sed -i 's/android:exported="false"/android:exported="true"/g' android/app/src/main/AndroidManifest.xml || true
 
       - name: Create placeholder icon if missing
@@ -80,10 +81,21 @@ jobs:
           flutter build apk --release
           flutter build apk --release --split-per-abi
 
+      - name: Bypass Play Protect (Generate Keystore & Sign)
+        run: |
+          # تولید کلید اختصاصی برای خروج از حالت دیباگ
+          keytool -genkey -v -keystore release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias release -dname "CN=Jetjon, OU=App, O=Jetjon, L=Tehran, S=Tehran, C=IR" -storepass "jetjon123" -keypass "jetjon123"
+          sudo apt-get install apksigner -y
+          # امضای تمام فایل‌های APK
+          apksigner sign --ks release.jks --ks-pass pass:jetjon123 build/app/outputs/flutter-apk/app-release.apk
+          apksigner sign --ks release.jks --ks-pass pass:jetjon123 build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk || true
+          apksigner sign --ks release.jks --ks-pass pass:jetjon123 build/app/outputs/flutter-apk/app-arm64-v8a-release.apk || true
+          apksigner sign --ks release.jks --ks-pass pass:jetjon123 build/app/outputs/flutter-apk/app-x86_64-release.apk || true
+
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: jetjon-luxury-apks
+          name: jetjon-apks
           path: |
             build/app/outputs/flutter-apk/app-release.apk
             build/app/outputs/flutter-apk/app-*-release.apk
