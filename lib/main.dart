@@ -6,12 +6,12 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
-import 'package:url_launcher/url_launcher.dart'; // اضافه شدن پکیج برای باز کردن لینک
+import 'package:url_launcher/url_launcher.dart';
 
-void main() => runApp(const JetjonLuxuryApp());
+void main() => runApp(const JetjonApp());
 
-class JetjonLuxuryApp extends StatelessWidget {
-  const JetjonLuxuryApp({super.key});
+class JetjonApp extends StatelessWidget {
+  const JetjonApp({super.key});
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -29,18 +29,18 @@ class JetjonLuxuryApp extends StatelessWidget {
         ),
         textTheme: GoogleFonts.vazirmatnTextTheme(),
       ),
-      home: const LuxuryLoginScreen(),
+      home: const LoginScreen(),
     );
   }
 }
 
-class LuxuryLoginScreen extends StatefulWidget {
-  const LuxuryLoginScreen({super.key});
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
   @override
-  State<LuxuryLoginScreen> createState() => _LuxuryLoginScreenState();
+  State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LuxuryLoginScreenState extends State<LuxuryLoginScreen> with SingleTickerProviderStateMixin {
+class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
   final _urlController = TextEditingController();
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
@@ -158,34 +158,28 @@ class _LuxuryLoginScreenState extends State<LuxuryLoginScreen> with SingleTicker
     final cookieManager = WebViewCookieManager(); 
     await cookieManager.clearCookies();
     
-    // تزریق کوکی هوشمند برای دیجی‌کالا و کپی‌برداری برای دیجی‌کالا جت
+    // تزریق کوکی فراگیر (Aggressive Cookie Injection) برای پشتیبانی کامل از SSO (Single Sign-On)
     for (var c in cookies) {
       String rawDomain = (c['domain'] ?? '').toString();
       String name = c['name'].toString();
       String value = c['value'].toString();
       String path = (c['path'] ?? '/').toString();
 
-      // ۱. تزریق با دامین اصلی دیجی‌کالا (مثلا .digikala.com)
-      await cookieManager.setCookie(
-        WebViewCookie(name: name, value: value, domain: rawDomain, path: path)
-      );
-      if (rawDomain.startsWith('.')) {
-        await cookieManager.setCookie(
-          WebViewCookie(name: name, value: value, domain: rawDomain.substring(1), path: path)
-        );
-      }
+      // ساخت لیست تمامی دامنه‌ها و ساب‌دامین‌های ممکن برای دیجی‌کالا و جت
+      Set<String> targetDomains = {
+        rawDomain,
+        rawDomain.startsWith('.') ? rawDomain.substring(1) : '.$rawDomain',
+        '.digikala.com',
+        'digikala.com',
+        'auth.digikala.com',
+        '.digikalajet.com',
+        'digikalajet.com'
+      };
 
-      // ۲. کپی کردن همزمان کوکی‌ها برای دامنه‌ی دیجی‌کالا جت
-      if (rawDomain.contains('digikala.com')) {
-        String jetDomain = rawDomain.replaceAll('digikala.com', 'digikalajet.com');
+      for (String domain in targetDomains) {
         await cookieManager.setCookie(
-          WebViewCookie(name: name, value: value, domain: jetDomain, path: path)
+          WebViewCookie(name: name, value: value, domain: domain, path: path)
         );
-        if (jetDomain.startsWith('.')) {
-          await cookieManager.setCookie(
-            WebViewCookie(name: name, value: value, domain: jetDomain.substring(1), path: path)
-          );
-        }
       }
     }
 
@@ -195,6 +189,7 @@ class _LuxuryLoginScreenState extends State<LuxuryLoginScreen> with SingleTicker
     
     if (controller.platform is AndroidWebViewController) {
       AndroidWebViewController.enableDebugging(false);
+      (controller.platform as AndroidWebViewController).setMediaPlaybackRequiresUserGesture(false);
     }
     
     await controller.addJavaScriptChannel('JetLogChannel', onMessageReceived: (m) => _appendLog(m.message));
@@ -234,7 +229,7 @@ class _LuxuryLoginScreenState extends State<LuxuryLoginScreen> with SingleTicker
         child: SingleChildScrollView(
           child: Column(
             children: [
-              // Header Luxury
+              // Header
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(24, 60, 24, 40),
@@ -250,7 +245,9 @@ class _LuxuryLoginScreenState extends State<LuxuryLoginScreen> with SingleTicker
                   ),
                   const SizedBox(height: 16),
                   Text("JETJON", style: GoogleFonts.vazirmatn(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: 4)),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 6),
+                  Text("ورود امن و آنی به دیجی‌کالا", style: GoogleFonts.vazirmatn(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w300)),
+                  const SizedBox(height: 8),
                   Container(height: 3, width: 32, decoration: BoxDecoration(color: const Color(0xFFEF4056), borderRadius: BorderRadius.circular(10))),
                 ]),
               ),
@@ -326,9 +323,9 @@ class _LuxuryLoginScreenState extends State<LuxuryLoginScreen> with SingleTicker
                     "پشتیبانی",
                     onTap: () async {
                       final Uri url = Uri.parse('https://t.me/DiGkaalaa');
-                      if (await canLaunchUrl(url)) {
+                      try {
                         await launchUrl(url, mode: LaunchMode.externalApplication);
-                      } else {
+                      } catch (e) {
                         _showSnack("نمی‌توان تلگرام را باز کرد", isError: true);
                       }
                     }
