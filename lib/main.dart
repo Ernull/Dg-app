@@ -60,11 +60,22 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         var u = url.toLowerCase();
         if (u.match(/\\.(png|jpg|jpeg|gif|webp|svg|ico|css|woff|woff2|ttf|js)(\\?.*)?\$/)) return false;
         if (u.includes('google-analytics') || u.includes('sentry') || u.includes('hotjar')) return false;
-        return u.includes('digikala') || u.includes('/api/') || u.includes('user') || u.includes('auth');
+        return u.includes('digikala') || u.includes('digikalajet') || u.includes('/api/') || u.includes('user') || u.includes('auth');
       }
       function sendToFlutter(payload) {
         try { if (window.JetLogChannel) window.JetLogChannel.postMessage(JSON.stringify(payload)); } catch(e) {}
       }
+      
+      // رفع مشکل لینک‌های target="_blank" برای انتقال روان به دیجی‌جت
+      setInterval(function() {
+        var links = document.getElementsByTagName('a');
+        for (var i = 0; i < links.length; i++) {
+          if (links[i].getAttribute('target') === '_blank') {
+            links[i].removeAttribute('target');
+          }
+        }
+      }, 1500);
+
       var originalFetch = window.fetch;
       window.fetch = async function() {
         var args = Array.from(arguments);
@@ -158,35 +169,47 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     final cookieManager = WebViewCookieManager(); 
     await cookieManager.clearCookies();
     
-    // دقیقاً منطق نسخه قدیمی شما که به درستی روی دیجی‌جت کار می‌کرد
-    for (var cookie in cookies) {
-      String domain = (cookie['domain'] ?? '').toString();
-      String name = cookie['name'].toString();
-      String value = cookie['value'].toString();
-      String path = (cookie['path'] ?? '/').toString();
+    // راهکار قطعی: تزریق کوکی بدون دستکاری نقطه برای نفوذ به لایه‌های API دیجی‌کالا و جت
+    for (var c in cookies) {
+      String rawDomain = (c['domain'] ?? '').toString();
+      String name = c['name'].toString();
+      String value = c['value'].toString();
+      String path = (c['path'] ?? '/').toString();
 
-      if (domain.startsWith('.')) {
-        domain = domain.substring(1);
-      }
-
+      // ۱. تزریق کوکی دقیقاً با دامنه‌ای که سرور پایتون داده است
       await cookieManager.setCookie(
-        WebViewCookie(name: name, value: value, domain: domain, path: path),
+        WebViewCookie(name: name, value: value, domain: rawDomain, path: path)
       );
+
+      // ۲. تزریق هوشمند و فراگیر توکن روی دامنه‌های اصلی تا ساب‌دامین‌ها و دیجی‌جت از کار نیفتند
+      if (name.toLowerCase().contains('token') || rawDomain.contains('digikala')) {
+        await cookieManager.setCookie(WebViewCookie(name: name, value: value, domain: ".digikala.com", path: path));
+        await cookieManager.setCookie(WebViewCookie(name: name, value: value, domain: ".api.digikala.com", path: path));
+        await cookieManager.setCookie(WebViewCookie(name: name, value: value, domain: ".digikalajet.com", path: path));
+      }
     }
 
     final controller = WebViewController();
     await controller.clearCache(); 
     await controller.clearLocalStorage();
     
+    // شبیه‌سازی کامل یک گوشی واقعی تا دیجی‌کالا متوجه مرورگر داخلی (WebView) نشود
+    await controller.setUserAgent("Mozilla/5.0 (Linux; Android 12; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36");
+
     if (controller.platform is AndroidWebViewController) {
       AndroidWebViewController.enableDebugging(false);
-      (controller.platform as AndroidWebViewController).setMediaPlaybackRequiresUserGesture(false);
+      final androidController = (controller.platform as AndroidWebViewController);
+      androidController.setMediaPlaybackRequiresUserGesture(false);
     }
     
     await controller.addJavaScriptChannel('JetLogChannel', onMessageReceived: (m) => _appendLog(m.message));
     
     controller..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(NavigationDelegate(
+        onNavigationRequest: (NavigationRequest request) {
+          // اجازه دادن به تمام ناوبری‌ها بدون دخالت اضافی
+          return NavigationDecision.navigate;
+        },
         onPageStarted: (_) async => await controller.runJavaScript(_networkInterceptorJs), 
         onPageFinished: (_) async { 
           await controller.runJavaScript(_networkInterceptorJs); 
@@ -220,6 +243,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         child: SingleChildScrollView(
           child: Column(
             children: [
+              // Header
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(24, 60, 24, 40),
@@ -302,6 +326,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                 ),
               ),
               const SizedBox(height: 24),
+              // Trust badges
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 32),
                 child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
@@ -315,7 +340,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                       try {
                         await launchUrl(url, mode: LaunchMode.externalApplication);
                       } catch (e) {
-                        _showSnack("نمی‌توان تلگرام را باز کرد", isError: true);
+                        _showSnack("نمی‌‌توان تلگرام را باز کرد", isError: true);
                       }
                     }
                   ),
