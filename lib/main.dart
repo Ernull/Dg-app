@@ -10,6 +10,14 @@ import 'package:url_launcher/url_launcher.dart';
 
 void main() => runApp(const JetjonApp());
 
+// کلاس جدید برای نگهداری اطلاعات هر اکانت به‌صورت مجزا
+class UserAccount {
+  final String title;
+  final List<dynamic> cookies;
+
+  UserAccount({required this.title, required this.cookies});
+}
+
 class JetjonApp extends StatelessWidget {
   const JetjonApp({super.key});
 
@@ -55,7 +63,10 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   WebViewController? _webViewController;
   File? _logFile;
 
-  // اسکریپت رهگیری درخواست‌ها دقیقاً مطابق فایل پایه
+  // لیست اکانت‌های استخراج شده
+  List<UserAccount> _accounts = [];
+  UserAccount? _currentAccount;
+
   static const String _networkInterceptorJs = """
     (function() {
       if (window.__nexusLoggerInstalled) return;
@@ -192,7 +203,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
   Future<void> _appendLog(String jsonString) async {
     if (_logFile == null) await _initLogFile();
-
     try {
       final Map<String, dynamic> data = json.decode(jsonString);
       final timestamp = DateTime.now().toIso8601String();
@@ -221,76 +231,98 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       _isLoading = false;
       _isFullyLoaded = false;
       _webViewController = null;
+      _accounts.clear();
+      _currentAccount = null;
       _urlController.clear();
     });
   }
 
-  Future<void> _processUrl() async {
-    final url = _urlController.text.trim();
-    if (url.isEmpty || !url.startsWith("http")) {
-      _showError("لطفاً یک لینک معتبر وارد کنید.");
+  // متد جدید برای پردازش گروهی لینک‌ها
+  Future<void> _processUrls() async {
+    final text = _urlController.text.trim();
+    if (text.isEmpty) {
+      _showError("لطفاً حداقل یک لینک وارد کنید.");
+      return;
+    }
+
+    // استخراج تمام لینک‌ها بر اساس فاصله یا خط جدید
+    final urls = text.split(RegExp(r'\s+')).where((u) => u.startsWith("http")).toList();
+    
+    if (urls.isEmpty) {
+      _showError("لینک معتبری یافت نشد.");
       return;
     }
 
     setState(() {
       _isLoading = true;
+      _accounts.clear();
     });
 
-    try {
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          "X-Client-App": "JetApp-Secure-Client",
-          "User-Agent": "JetAppClient/1.0",
-        },
-      );
+    int accountCounter = 1;
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        List<dynamic> cookies = [];
-        var sessionData = data['session'] ?? data;
+    for (String url in urls) {
+      try {
+        final response = await http.get(
+          Uri.parse(url),
+          headers: {
+            "X-Client-App": "JetApp-Secure-Client",
+            "User-Agent": "JetAppClient/1.0",
+          },
+        );
 
-        if (sessionData is List) {
-          cookies = sessionData;
-        } else if (sessionData is Map && sessionData.containsKey('cookies')) {
-          cookies = sessionData['cookies'];
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          List<dynamic> cookies = [];
+          var sessionData = data['session'] ?? data;
+
+          if (sessionData is List) {
+            cookies = sessionData;
+          } else if (sessionData is Map && sessionData.containsKey('cookies')) {
+            cookies = sessionData['cookies'];
+          }
+
+          if (cookies.isNotEmpty) {
+            _accounts.add(UserAccount(title: "اکانت $accountCounter", cookies: cookies));
+            accountCounter++;
+          }
         }
-
-        if (cookies.isNotEmpty) {
-          await _setupWebViewAndInjectCookies(cookies);
-        } else {
-          _showError("کوکی معتبری در لینک یافت نشد.");
-          setState(() {
-            _isLoading = false;
-          });
-        }
-      } else {
-        _showError("لینک نامعتبر است یا منقضی شده.");
-        setState(() {
-          _isLoading = false;
-        });
+      } catch (e) {
+        // نادیده گرفتن لینک‌های خراب و ادامه دادن به لینک‌های بعدی
       }
-    } catch (e) {
-      _showError("خطا در ارتباط با سرور.");
+    }
+
+    if (_accounts.isEmpty) {
+      _showError("کوکی معتبری در لینک‌های وارد شده یافت نشد.");
       setState(() {
         _isLoading = false;
       });
+      return;
     }
+
+    // لود کردن اولین اکانت به‌صورت پیش‌فرض
+    await _switchToAccount(_accounts.first);
   }
 
-  // منطق دقیق و دست‌نخورده از فایل ارسالی شما
-  Future<void> _setupWebViewAndInjectCookies(List<dynamic> cookies) async {
+  // متد کاملاً ایزوله برای جابجایی بین اکانت‌ها بدون تداخل
+  Future<void> _switchToAccount(UserAccount account) async {
+    setState(() {
+      _isLoading = true;
+      _isFullyLoaded = false;
+      _currentAccount = account;
+    });
+
     final cookieManager = WebViewCookieManager();
+    
+    // ۱. پاکسازی کامل کوکی‌های قبلی برای جلوگیری از تداخل
     await cookieManager.clearCookies();
 
-    // تزریق کوکی‌ها به مرورگر داخلی
-    for (var cookie in cookies) {
+    // ۲. تزریق کوکی‌های اکانت جدید
+    for (var cookie in account.cookies) {
       String domain = (cookie['domain'] ?? '').toString();
       String name = cookie['name'].toString();
       String value = cookie['value'].toString();
       String path = (cookie['path'] ?? '/').toString();
 
-      // حذف نقطه ابتدای دامنه در صورت وجود برای سازگاری بهتر
       if (domain.startsWith('.')) {
         domain = domain.substring(1);
       }
@@ -300,46 +332,103 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       );
     }
 
-    final WebViewController controller = WebViewController();
-    await controller.clearCache();
-    await controller.clearLocalStorage();
+    // ۳. آماده‌سازی و پاکسازی دیتای لوکال کنترلر مرورگر
+    if (_webViewController == null) {
+      final WebViewController controller = WebViewController();
+      
+      if (controller.platform is AndroidWebViewController) {
+        AndroidWebViewController.enableDebugging(false);
+        (controller.platform as AndroidWebViewController).setMediaPlaybackRequiresUserGesture(false);
+      }
 
-    if (controller.platform is AndroidWebViewController) {
-      AndroidWebViewController.enableDebugging(false);
-      (controller.platform as AndroidWebViewController).setMediaPlaybackRequiresUserGesture(false);
-    }
-
-    await controller.addJavaScriptChannel(
-      'JetLogChannel',
-      onMessageReceived: (JavaScriptMessage message) {
-        _appendLog(message.message);
-      },
-    );
-
-    controller
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageStarted: (String url) async {
-            await controller.runJavaScript(_networkInterceptorJs);
-          },
-          onPageFinished: (String url) async {
-            await controller.runJavaScript(_networkInterceptorJs);
-            setState(() {
-              _isFullyLoaded = true;
-            });
-          },
-        ),
+      await controller.addJavaScriptChannel(
+        'JetLogChannel',
+        onMessageReceived: (JavaScriptMessage message) {
+          _appendLog(message.message);
+        },
       );
 
-    // پس از تنظیم کوکی‌ها مستقیماً وارد پروفایل می‌شویم
-    controller.loadRequest(Uri.parse('https://www.digikala.com/profile/'));
+      controller
+        ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..setNavigationDelegate(
+          NavigationDelegate(
+            onPageStarted: (String url) async {
+              await controller.runJavaScript(_networkInterceptorJs);
+            },
+            onPageFinished: (String url) async {
+              await controller.runJavaScript(_networkInterceptorJs);
+              setState(() {
+                _isFullyLoaded = true;
+              });
+            },
+          ),
+        );
+        
+      _webViewController = controller;
+    } else {
+      // اگر کنترلر از قبل وجود دارد، کش و حافظه لوکال را خالی می‌کنیم تا سشن‌ها ترکیب نشوند
+      await _webViewController!.clearCache();
+      try {
+        await _webViewController!.runJavaScript("localStorage.clear(); sessionStorage.clear();");
+      } catch (_) {}
+    }
+
+    // ۴. بارگذاری مجدد صفحه برای اعمال اکانت جدید
+    _webViewController!.loadRequest(Uri.parse('https://www.digikala.com/profile/'));
 
     setState(() {
-      _webViewController = controller;
       _showWebView = true;
       _isLoading = false;
     });
+  }
+
+  // نمایش منوی کشویی پایین صفحه برای انتخاب اکانت
+  void _showAccountSwitcher() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text("سوئیچ بین اکانت‌ها", style: GoogleFonts.vazirmatn(fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 10),
+              const Divider(color: Color(0xFFF0F0F0)),
+              ..._accounts.map((acc) {
+                final isSelected = acc == _currentAccount;
+                return ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: isSelected ? const Color(0xFFEF4056).withOpacity(0.1) : const Color(0xFFF0F0F0),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.person_rounded, color: isSelected ? const Color(0xFFEF4056) : Colors.grey.shade600),
+                  ),
+                  title: Text(acc.title, style: GoogleFonts.vazirmatn(color: isSelected ? const Color(0xFFEF4056) : Colors.black, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+                  trailing: isSelected ? const Icon(Icons.check_circle_rounded, color: Color(0xFFEF4056)) : null,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    if (!isSelected) {
+                      _switchToAccount(acc);
+                    }
+                  },
+                );
+              }).toList(),
+              const SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   void _showError(String message) {
@@ -392,8 +481,16 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
               backgroundColor: Colors.white,
               elevation: 0,
               centerTitle: true,
-              title: Text("حساب کاربری", style: GoogleFonts.vazirmatn(fontWeight: FontWeight.w700, fontSize: 16, color: const Color(0xFF0F0F0F))),
+              title: Text(_currentAccount?.title ?? "حساب کاربری", style: GoogleFonts.vazirmatn(fontWeight: FontWeight.w700, fontSize: 16, color: const Color(0xFF0F0F0F))),
               leading: IconButton(icon: const Icon(Icons.arrow_forward_rounded, color: Colors.black), onPressed: _resetApp),
+              actions: [
+                if (_accounts.length > 1) // دکمه سوئیچ فقط وقتی بیش از ۱ اکانت باشد نمایش داده می‌شود
+                  IconButton(
+                    icon: const Icon(Icons.switch_account_rounded, color: Color(0xFFEF4056)),
+                    tooltip: "تغییر اکانت",
+                    onPressed: _showAccountSwitcher,
+                  ),
+              ],
               bottom: PreferredSize(preferredSize: const Size.fromHeight(1), child: Container(height: 1, color: const Color(0xFFF0F0F0))),
             )
           : null,
@@ -451,16 +548,19 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                             Row(children: [
                               Container(width: 4, height: 20, decoration: BoxDecoration(color: const Color(0xFFEF4056), borderRadius: BorderRadius.circular(10))),
                               const SizedBox(width: 8),
-                              Text("لینک ورود خود را وارد کنید", style: GoogleFonts.vazirmatn(fontWeight: FontWeight.w700, fontSize: 15, color: const Color(0xFF0F0F0F))),
+                              Text("لینک‌های ورود خود را وارد کنید", style: GoogleFonts.vazirmatn(fontWeight: FontWeight.w700, fontSize: 15, color: const Color(0xFF0F0F0F))),
                             ]),
                             const SizedBox(height: 20),
                             TextField(
                               controller: _urlController,
                               textDirection: TextDirection.ltr,
+                              maxLines: 5, // تغییر به ۵ خط برای دریافت گروهی لینک‌ها
+                              minLines: 1,
+                              keyboardType: TextInputType.multiline,
                               style: GoogleFonts.jetBrainsMono(fontSize: 13, color: const Color(0xFF0F0F0F)),
                               decoration: InputDecoration(
-                                hintText: "https://...",
-                                hintStyle: GoogleFonts.jetBrainsMono(color: const Color(0xFFC0C2C5), fontSize: 13),
+                                hintText: "لینک‌ها را با فاصله یا خط جدید وارد کنید...",
+                                hintStyle: GoogleFonts.jetBrainsMono(color: const Color(0xFFC0C2C5), fontSize: 12),
                                 filled: true,
                                 fillColor: const Color(0xFFF7F7F7),
                                 prefixIcon: Icon(Icons.link_rounded, color: _urlController.text.isNotEmpty ? const Color(0xFFEF4056) : const Color(0xFFC0C2C5)),
@@ -475,7 +575,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                             SizedBox(
                               height: 54,
                               child: ElevatedButton(
-                                onPressed: _isLoading ? null : _processUrl,
+                                onPressed: _isLoading ? null : _processUrls,
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: const Color(0xFFEF4056),
                                   foregroundColor: Colors.white,
